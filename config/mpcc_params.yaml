@@ -1,97 +1,83 @@
-# MPCC Controller Parameters
-# Based on ETH Zurich paper: arXiv:1711.07300v1
+# MPCC Controller Parameters for F1Tenth (DynamicBicycle2D + Fiala tire model)
 
 mpcc_controller:
   ros__parameters:
     # ============================================================================
     # Controller Settings
     # ============================================================================
-    
+
     # Prediction horizon
-    horizon_length: 10                # Number of prediction steps (N)
-    dt: 0.05                          # Timestep in seconds (50ms = 20Hz)
-    
-    # Control loop frequency
-    control_frequency: 20.0           # Hz
-    
-    
+    horizon_length: 20                # Number of prediction steps (N)
+    dt: 0.05                          # Model timestep [s] — must equal 1/control_frequency
+    control_frequency: 20.0           # Hz — must equal 1/dt (was 60 but model uses dt=0.05=20Hz)
+
     # ============================================================================
-    # Cost Function Weights (Equation 11, Page 11)
+    # Cost Function Weights
     # ============================================================================
-    
-    # Contouring error penalty (perpendicular to track)
-    q_contour: 50.0                   # q_c in paper
-    
-    # Lag error penalty (along track direction)
-    q_lag: 50.0                      # q_l in paper
-    
-    # Progress reward (encourages forward motion)
-    gamma: 100.0                        # γ in paper (negative cost for velocity)
-    
-    # Input regularization
-    r_steering: 0.1                   # Steering input smoothness
-    r_accel: 0.1                      # Acceleration input smoothness
-    
-    # Track boundary slack penalty
-    q_slack: 100.0                   # Very high to avoid track violations
-    
-    
+
+    # Contouring error (perpendicular to path centerline) — main "keep center" weight
+    Q_c: 80.0
+
+    # Lag error (along-path progress) — must be non-trivial to prevent drifting behind
+    Q_l: 5.0
+
+    # Heading error — KEEP LOW to avoid "turns early" before corners
+    Q_theta: 80.0
+
+    # Velocity tracking error
+    Q_v: 50.0
+
+    # Yaw-rate damping (oscillation reduction)
+    Q_r: 15.0
+
+    # Target speed [m/s]
+    v_ref: 1.5
+
+    # Input regularization: [delta_dot, tau_dot, v_psi]
+    R_delta_dot: 50.0
+    R_tau_dot: 0.1
+    R_vpsi: 0.0
+
+    # Desired path-progress rate [m/s] — should roughly match v_ref
+    v_psi_ref: 1.5
+
     # ============================================================================
-    # Vehicle Model Parameters (Section II-A, Pages 4-5)
+    # Vehicle Model Parameters (F1Tenth 1:10 scale)
     # ============================================================================
-    
-    # Kinematic bicycle model
-    wheelbase: 0.33                   # L: distance between axles (meters)
-    
-    # Vehicle constraints
-    max_steering: 1                 # Maximum steering angle (radians) ≈ 23°
-    max_acceleration: 3.0             # Maximum acceleration (m/s²)
-    max_velocity: 8.0                 # Maximum velocity (m/s)
-    min_velocity: 0.0                 # Minimum velocity (m/s)
-    
-    
+
+    a: 0.17                            # Front axle to CG [m]
+    b: 0.16                            # Rear axle to CG [m]
+    wheel_base: 0.3302
+    body_length: 0.5
+    body_width: 0.2032
+    radius: 0.2
+    m: 3.74                            # Vehicle mass [kg]
+    Iz: 0.04                           # Yaw moment of inertia [kg*m^2]
+    Cc_f: 300.0                        # Front cornering stiffness [N/rad]
+    Cc_r: 300.0                        # Rear cornering stiffness [N/rad]
+    mu: 1.0
+    r_w: 0.0508                        # Wheel radius [m]
+    gamma: 0.95
+
+    # Input limits
+    delta_max: 0.4189                  # 24 deg in radians
+    delta_dot_max: 1.0472              # 60 deg/s in radians
+    tau_max: 5.0
+    tau_dot_max: 10.0
+
+    # State limits
+    v_max: 3.0
+    v_min: 0.1
+    r_max: 6.0
+    beta_max: 0.7854                   # 45 deg in radians
+    v_psi_max: 5.0
+
     # ============================================================================
-    # Track Parameters
+    # Waypoint file
     # ============================================================================
-    
-    # Track geometry
-    track_width: 1.0                  # Track width (meters)
-    
-    # Waypoint file (can be overridden by launch argument)
     waypoints_file: "waypoints.csv"
-    
-    
-    # ============================================================================
-    # QP Solver Settings (OSQP)
-    # ============================================================================
-    
-    solver:
-      max_iter: 4000                  # Maximum solver iterations
-      eps_abs: 1.0e-4                 # Absolute tolerance
-      eps_rel: 1.0e-4                 # Relative tolerance
-      verbose: false                  # Print solver output
-      warm_start: true                # Use previous solution as initial guess
-    
-    
+
     # ============================================================================
     # Visualization
     # ============================================================================
-    
-    visualize: true                   # Publish visualization markers
-    viz_predicted_path: true          # Show predicted trajectory
-    viz_reference_path: true          # Show reference centerline
-    viz_track_boundaries: true        # Show track boundaries
-    viz_errors: true                  # Show contouring/lag errors
-    
-    
-    # ============================================================================
-    # Safety
-    # ============================================================================
-    
-    # Timeout for odometry messages
-    odom_timeout: 0.5                 # seconds
-    
-    # Emergency stop conditions
-    enable_emergency_stop: true
-    max_contouring_error: 0.5         # meters (stop if exceeded)
-    max_lag_error: 2.0                # meters (stop if exceeded)
+    visualize: true

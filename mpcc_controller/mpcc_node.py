@@ -69,58 +69,59 @@ class MPCCNode(Node):
         self._beta: float = 0.0
 
         self.initialized = False
+        self._loop_dt: float | None = None   # actual timer period; set after reading params
 
         # ── declare parameters ─────────────────────────────────────────────
         self.declare_parameter('waypoints_file', 'waypoints.csv')
         self.declare_parameter('dt', 0.05)
-        self.declare_parameter('control_frequency', 1.0)
+        self.declare_parameter('control_frequency', 20.0)
         self.declare_parameter('horizon_length', 30)
         self.declare_parameter('visualize', True)
 
-        # Vehicle geometry — key names match DynamicBicycle2D.__init__ robot_spec keys
-        self.declare_parameter('a', 1.4)               # front axle to CG      [m]
-        self.declare_parameter('b', 1.4)               # rear axle to CG       [m]
-        self.declare_parameter('wheel_base', 2.8)
-        self.declare_parameter('body_length', 4.5)
-        self.declare_parameter('body_width', 2.0)
-        self.declare_parameter('radius', 1.2)          # collision radius       [m]
+        # Vehicle geometry — F1Tenth scale (wheelbase ~0.33 m)
+        self.declare_parameter('a', 0.17)              # front axle to CG      [m]
+        self.declare_parameter('b', 0.16)              # rear axle to CG       [m]
+        self.declare_parameter('wheel_base', 0.3302)
+        self.declare_parameter('body_length', 0.5)
+        self.declare_parameter('body_width', 0.2032)   # from xacro
+        self.declare_parameter('radius', 0.2)          # collision radius       [m]
 
-        # Mass / inertia
-        self.declare_parameter('m', 2500.0)            # vehicle mass           [kg]
-        self.declare_parameter('Iz', 5000.0)           # yaw moment of inertia  [kg*m^2]
+        # Mass / inertia — F1Tenth 1:10 scale (Traxxas with electronics ~3.74 kg)
+        self.declare_parameter('m', 3.74)              # vehicle mass           [kg]
+        self.declare_parameter('Iz', 0.04)             # yaw moment of inertia  [kg*m^2]
 
-        # Tire parameters — Fiala brush model in DynamicBicycle2D
-        self.declare_parameter('Cc_f', 80000.0)        # front cornering stiff. [N/rad]
-        self.declare_parameter('Cc_r', 100000.0)       # rear cornering stiff.  [N/rad]
+        # Tire parameters — Fiala brush model, scaled for F1Tenth
+        self.declare_parameter('Cc_f', 300.0)          # front cornering stiff. [N/rad]
+        self.declare_parameter('Cc_r', 300.0)          # rear cornering stiff.  [N/rad]
         self.declare_parameter('mu', 1.0)              # friction coefficient
-        self.declare_parameter('r_w', 0.35)            # wheel radius           [m]
+        self.declare_parameter('r_w', 0.0508)          # wheel radius from xacro [m]
         self.declare_parameter('gamma', 0.95)          # numeric stability param
 
         # Input limits
-        self.declare_parameter('delta_max', np.deg2rad(20.0))     # [rad]
-        self.declare_parameter('delta_dot_max', np.deg2rad(25.0)) # [rad/s]
-        self.declare_parameter('tau_max', 4000.0)                 # [Nm]
-        self.declare_parameter('tau_dot_max', 8000.0)             # [Nm/s]
+        self.declare_parameter('delta_max', np.deg2rad(24.0))     # [rad]
+        self.declare_parameter('delta_dot_max', np.deg2rad(60.0)) # [rad/s]
+        self.declare_parameter('tau_max', 5.0)                    # [Nm]
+        self.declare_parameter('tau_dot_max', 10.0)               # [Nm/s]
 
         # State limits
-        self.declare_parameter('v_max', 1.0)
-        self.declare_parameter('v_min', 0.5)
-        self.declare_parameter('r_max', 2.0)
+        self.declare_parameter('v_max', 3.0)
+        self.declare_parameter('v_min', 0.1)
+        self.declare_parameter('r_max', 6.0)
         self.declare_parameter('beta_max', np.deg2rad(45.0))      # [rad]
-        self.declare_parameter('v_psi_max', 15.0)                 # max progress rate [m/s]
+        self.declare_parameter('v_psi_max', 5.0)                  # max progress rate [m/s]
 
         # MPCC cost weights — names match MPCC.set_cost_weights() keyword args exactly
-        self.declare_parameter('Q_c', 30.0)        # contouring error weight
-        self.declare_parameter('Q_l', 0.1)         # lag error weight
-        self.declare_parameter('Q_theta', 1500.0)  # heading error weight
-        self.declare_parameter('Q_v', 100.0)       # velocity tracking weight
-        self.declare_parameter('Q_r', 20.0)        # yaw rate penalty weight
-        self.declare_parameter('v_ref', 7.0)       # target speed             [m/s]
+        self.declare_parameter('Q_c', 100.0)       # contouring error (perpendicular to path)
+        self.declare_parameter('Q_l', 5.0)         # lag error (along path — must not be ~0)
+        self.declare_parameter('Q_theta', 20.0)    # heading error — keep LOW or car turns early
+        self.declare_parameter('Q_v', 50.0)        # velocity tracking weight
+        self.declare_parameter('Q_r', 10.0)        # yaw rate damping
+        self.declare_parameter('v_ref', 1.5)       # target speed             [m/s]
         # R vector order: [delta_dot, tau_dot, v_psi] — matches MPCC.set_rterm order
-        self.declare_parameter('R_delta_dot', 50.0)
+        self.declare_parameter('R_delta_dot', 80.0)  # higher → smoother steering
         self.declare_parameter('R_tau_dot', 0.1)
         self.declare_parameter('R_vpsi', 0.0)
-        self.declare_parameter('v_psi_ref', 7.0)  # desired progress rate    [m/s]
+        self.declare_parameter('v_psi_ref', 1.5)  # desired progress rate    [m/s]
 
         # ── read parameters ────────────────────────────────────────────────
         waypoints_file    = self.get_parameter('waypoints_file').value
@@ -222,11 +223,18 @@ class MPCCNode(Node):
             self.ref_path_pub  = self.create_publisher(Path, '/mpcc/reference_path',  qos)
 
         # ── control timer ─────────────────────────────────────────────────
-        self.create_timer(1.0 / self.control_freq, self.control_loop)
+        self._loop_dt = 1.0 / self.control_freq   # actual wall-clock step used for integration
+        self.create_timer(self._loop_dt, self.control_loop)
+
+        if abs(self._loop_dt - dt) > 1e-4:
+            self.get_logger().warn(
+                f'control_frequency ({self.control_freq} Hz = {self._loop_dt:.4f}s) does not '
+                f'match model dt ({dt}s). Integration will use actual loop period.'
+            )
 
         self.get_logger().info('MPCC node ready')
         self.get_logger().info(
-            f'Control: {self.control_freq} Hz | dt={dt} s | horizon={horizon} steps'
+            f'Control: {self.control_freq} Hz | model_dt={dt} s | loop_dt={self._loop_dt:.4f}s | horizon={horizon} steps'
         )
 
     # ── waypoint loader ────────────────────────────────────────────────────
@@ -244,9 +252,22 @@ class MPCCNode(Node):
             for row in csv.DictReader(f):
                 rows.append([float(row['x_m']), float(row['y_m'])])
 
-        rows = list(reversed(rows))   # same direction convention as old node
-        arr  = np.array(rows)
-        return arr[:, 0], arr[:, 1]
+        arr = np.array(rows)
+        # Reverse so the path runs in the direction the car travels from spawn (sx=0,sy=0,sθ=0 → +x).
+        # Without reversal the CSV starts at ~(-0, 0.04) heading -x, giving a ~180° heading error
+        # at spawn which causes an immediate wall crash.
+        arr = arr[::-1]
+        path_x, path_y = arr[:, 0], arr[:, 1]
+
+        dx0 = path_x[1] - path_x[0]
+        dy0 = path_y[1] - path_y[0]
+        self.get_logger().info(
+            f'Waypoints: {len(path_x)} points | '
+            f'first segment heading: ({dx0:.3f}, {dy0:.3f}) '
+            f'≈ {np.rad2deg(np.arctan2(dy0, dx0)):.1f} deg | '
+            f'first point: ({path_x[0]:.2f}, {path_y[0]:.2f})'
+        )
+        return path_x, path_y
 
     # ── odom callback ──────────────────────────────────────────────────────
 
@@ -254,16 +275,14 @@ class MPCCNode(Node):
         """
         Cache observable states from /ego_racecar/odom.
 
-        Directly observable:
-            x, y   — msg.pose.pose.position.x/y
-            theta  — yaw from quaternion
-            V      — msg.twist.twist.linear.x     (body-frame longitudinal speed)
-            r      — msg.twist.twist.angular.z    (yaw rate, available in odom)
+        gym_bridge publishes twist in the GLOBAL frame:
+            twist.linear.x = v * cos(theta)   (NOT body-frame longitudinal)
+            twist.linear.y = v * sin(theta)    (NOT body-frame lateral)
+            twist.angular.z = yaw rate
 
-        Not in /odom (handled in control_loop):
-            beta   — held at 0
-            delta  — integrated from delta_dot
-            tau    — integrated from tau_dot
+        Speed magnitude V = sqrt(vx^2 + vy^2) is frame-independent, so correct.
+        Beta (sideslip) is zero for the f1tenth kinematic model — never computed
+        from odom because arctan2(vy_global, vx_global) = theta, not sideslip.
         """
         self._x = msg.pose.pose.position.x
         self._y = msg.pose.pose.position.y
@@ -277,13 +296,14 @@ class MPCCNode(Node):
         cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
         self._theta = np.arctan2(siny_cosp, cosy_cosp)
 
-        # Yaw rate — directly from odom, unused in old node
         self._r = msg.twist.twist.angular.z
 
+        # gym_bridge twist is in global frame → speed magnitude is correct
         vx = msg.twist.twist.linear.x
         vy = msg.twist.twist.linear.y
-        self._V = np.sqrt(vx**2 + vy**2)  # true speed magnitude
-        self._beta = np.arctan2(vy, vx) if np.sqrt(vx**2 + vy**2) > 0.5 else self._beta
+        self._V = np.sqrt(vx**2 + vy**2)
+        # _beta stays 0.0 — kinematic model has no sideslip;
+        # arctan2(vy_global, vx_global) = theta, not sideslip
 
         self.get_logger().info(
                 f'odom: '
@@ -354,11 +374,10 @@ class MPCCNode(Node):
             tau_dot   = float(U[1, 0])   # [Nm/s]
 
             # ── 4. integrate echo states ───────────────────────────────────
-            # delta and tau are rate-controlled in the DynamicBicycle2D model:
-            #   delta_next = delta + delta_dot * dt
-            #   tau_next   = tau   + tau_dot   * dt
-            # We mirror that integration here so the next tick's state is consistent.
-            dt = self.car.dt
+            # Use the actual wall-clock timer period, not the MPCC model's dt.
+            # If control_frequency != 1/model_dt these would differ and cause
+            # the steering estimate to drift at the wrong rate.
+            dt = self._loop_dt
             self._delta_est = float(np.clip(
                 self._delta_est + delta_dot * dt,
                 -self.car.robot_spec['delta_max'],

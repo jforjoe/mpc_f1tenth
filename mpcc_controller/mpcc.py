@@ -53,16 +53,17 @@ class MPCC:
         self.n_controls = 3    # [delta_dot, tau_dot, v_psi]
         
         # Cost function weights (tuned for smooth tracking)
-        self.Q_c = 100.0     # Contouring error (reduced for less aggressive correction)
-        self.Q_l = 5.0       # Lag error  
-        self.Q_theta = 30.0  # Heading error
-        self.Q_v = 20.0      # Velocity tracking
-        self.Q_r = 10.0      # Yaw rate penalty (to reduce oscillation)
-        self.v_ref = 5.0     # Target velocity [m/s]
+        # CRITICAL: These weights control the controller's priorities. Imbalance causes crashes.
+        self.Q_c = 200.0     # Contouring error: stay on reference path (PRIMARY)
+        self.Q_l = 40.0      # Lag error: INCREASED from 5.0 to ensure tangential tracking
+        self.Q_theta = 20.0  # Heading error: REDUCED from 30.0 to prevent early turns at corners
+        self.Q_v = 20.0      # Velocity tracking: regulate speed around v_ref
+        self.Q_r = 10.0      # Yaw rate penalty: smooth steering to reduce oscillation
+        self.v_ref = 1.5     # Target velocity [m/s] - REDUCED from 5.0 (F1Tenth standard: 1.0-2.0 m/s)
         # Control weights: [delta_dot, tau_dot, v_psi]
         # All weights must be non-negative for proper cost minimization
         self.R = np.array([50.0, 0.01, 0.1])
-        self.v_psi_ref = 2.0  # Slower progress rate
+        self.v_psi_ref = 1.5  # Progress rate along path [m/s] - MATCHED to v_ref for consistency
         
         # Reference path
         self.path_x = None
@@ -422,12 +423,21 @@ class MPCC:
         Returns:
             u: Control input [delta_dot, tau_dot]
         """
-        # Sync path parameter with robot's actual position
-        # This ensures reference doesn't run away from the robot
         robot_x = robot_state[0, 0] if robot_state.ndim > 1 else robot_state[0]
         robot_y = robot_state[1, 0] if robot_state.ndim > 1 else robot_state[1]
         self._current_psi = self._find_closest_path_point(robot_x, robot_y)
-        
+
+        # Guard against the closed-loop seam:
+        # On closed tracks (like Spielberg), when vehicle reaches end of path,
+        # the arc-length parameter psi wraps around. The linear threshold (1e-6)
+        # is too fragile. Use robust modulo wrap to ensure continuous progress.
+        if self.path_length > 0:
+            self._current_psi = self._current_psi % self.path_length
+            # Additional safety: if we're within 1cm of wrap point, nudge slightly
+            # to prevent np.interp(psi=path_length, ...) → interpolation to path[0]
+            if self._current_psi > self.path_length - 0.01:
+                self._current_psi = self.path_length - 0.01
+
         # Build MPC state: [x, y, theta, r, beta, V, delta, tau, psi]
         mpc_state = np.vstack([robot_state[:8], [[self._current_psi]]])
         

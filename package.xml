@@ -14,11 +14,16 @@
   <depend>sensor_msgs</depend>
   <depend>ackermann_msgs</depend>
   <depend>visualization_msgs</depend>
+  <depend>ament_index_python</depend>
 
   <!-- Python dependencies -->
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-scipy</exec_depend>
   <exec_depend>python3-matplotlib</exec_depend>
+  <exec_depend>python3-pil</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-skimage</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

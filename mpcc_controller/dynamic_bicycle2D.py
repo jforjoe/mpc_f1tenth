@@ -50,19 +50,34 @@ class DynamicBicycle2D:
         self.robot_spec.setdefault('model', 'DynamicBicycle2D')
         
         # Vehicle geometry
-        self.robot_spec.setdefault('a', 1.6)  # Front axle to CG [m]
-        self.robot_spec.setdefault('b', 0.8)  # Rear axle to CG [m]
+        # self.robot_spec.setdefault('a', 1.6)  # Front axle to CG [m]
+        # self.robot_spec.setdefault('b', 0.8)  # Rear axle to CG [m]
+
+        self.robot_spec.setdefault('a', 0.16)  # Front axle to CG [m]
+        self.robot_spec.setdefault('b', 0.17)  # Rear axle to CG [m]
         self.robot_spec.setdefault('wheel_base', self.robot_spec['a'] + self.robot_spec['b'])
         
         # Mass and inertia
-        self.robot_spec.setdefault('m', 1500.0)  # Vehicle mass [kg]
-        self.robot_spec.setdefault('Iz', 2500.0)  # Yaw moment of inertia [kg*m^2]
+        # self.robot_spec.setdefault('m', 1500.0)  # Vehicle mass [kg]
+        # self.robot_spec.setdefault('Iz', 2500.0)  # Yaw moment of inertia [kg*m^2]
+        
+        # # Tire parameters
+        # self.robot_spec.setdefault('Cc_f', 80000.0)  # Front cornering stiffness [N/rad]
+        # self.robot_spec.setdefault('Cc_r', 120000.0)  # Rear cornering stiffness [N/rad]
+
+        # Mass and inertia
+        self.robot_spec.setdefault('m', 3.7)  # Vehicle mass [kg]
+        self.robot_spec.setdefault('Iz', 0.04)  # Yaw moment of inertia [kg*m^2]
         
         # Tire parameters
-        self.robot_spec.setdefault('Cc_f', 80000.0)  # Front cornering stiffness [N/rad]
-        self.robot_spec.setdefault('Cc_r', 120000.0)  # Rear cornering stiffness [N/rad]
+        self.robot_spec.setdefault('Cc_f', 200.0)  # Front cornering stiffness [N/rad]
+        self.robot_spec.setdefault('Cc_r', 200.0)  # Rear cornering stiffness [N/rad]
+
+
         self.robot_spec.setdefault('mu', 1.0)  # Friction coefficient
-        self.robot_spec.setdefault('r_w', 0.3)  # Wheel radius [m]
+        # self.robot_spec.setdefault('r_w', 0.3)  # Wheel radius [m]
+        self.robot_spec.setdefault('r_w', 0.0508)  # Wheel radius [m]
+
         self.robot_spec.setdefault('gamma', 0.99)  # Numeric stability parameter
         
         # Input limits
