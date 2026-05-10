@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 import os
 from glob import glob
 
-package_name = 'mpcc_controller'
+package_name = 'kinematic_mpc'
 
 setup(
     name=package_name,
@@ -12,36 +12,23 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        (os.path.join('share', package_name, 'launch'), 
+        (os.path.join('share', package_name, 'launch'),
             glob('launch/*.launch.py')),
-        (os.path.join('share', package_name, 'config'), 
-            glob('config/*.yaml')),
-        (os.path.join('share', package_name, 'config'), 
+        (os.path.join('share', package_name, 'config'),
             glob('config/*.csv')),
-        (os.path.join('share', package_name, 'maps'), 
-            glob('maps/*.png')),
-        (os.path.join('share', package_name, 'maps'), 
-            glob('maps/*.yaml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='Bhavik Jain',
-    maintainer_email='bhavik.bj.1205@gmail.com',
-    description='Model Predictive Contouring Control (MPCC) for F1TENTH autonomous racing',
+    maintainer='Joel Siby',
+    maintainer_email='joel.siby@e-yantra.org',
+    description='Kinematic MPC controller for F1TENTH (CasADi + IPOPT)',
     license='MIT',
     extras_require={
-        'test': [
-            'pytest',
-        ],
+        'test': ['pytest'],
     },
     entry_points={
         'console_scripts': [
-            'mpcc_node = mpcc_controller.mpcc_node:main',
-            
-            # Utility scripts
-            'extract_waypoints = mpcc_controller.utils.extract_waypoints:main',
-            'visualize_track = mpcc_controller.utils.visualize_track:main',
-            'tune_params = mpcc_controller.utils.tune_params:main',
+            'kinematic_mpc_node = kinematic_mpc.mpc_node:main',
         ],
     },
 )

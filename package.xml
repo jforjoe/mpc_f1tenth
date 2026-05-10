@@ -1,29 +1,21 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>mpcc_controller</name>
+  <name>kinematic_mpc</name>
   <version>0.0.0</version>
-  <description>Model Predictive Contouring Control (MPCC) for F1TENTH autonomous racing</description>
-  <maintainer email="bhavik.bj.1205@gmail.com">Bhavik Jain</maintainer>
+  <description>Kinematic MPC controller for F1TENTH (CasADi + IPOPT)</description>
+  <maintainer email="joel.siby@e-yantra.org">Joel Siby</maintainer>
   <license>MIT</license>
 
   <depend>rclpy</depend>
-  <depend>std_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>geometry_msgs</depend>
-  <depend>sensor_msgs</depend>
   <depend>ackermann_msgs</depend>
-  <depend>visualization_msgs</depend>
   <depend>ament_index_python</depend>
 
-  <!-- Python dependencies -->
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-scipy</exec_depend>
-  <exec_depend>python3-matplotlib</exec_depend>
-  <exec_depend>python3-pil</exec_depend>
-  <exec_depend>python3-opencv</exec_depend>
-  <exec_depend>python3-yaml</exec_depend>
-  <exec_depend>python3-skimage</exec_depend>
+  <exec_depend>python3-pandas</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

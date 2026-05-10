@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""ROS2 node: receding-horizon Kinematic MPC for F1TENTH.
+
+All tunable parameters live at the top of this file.
+"""
+
+import os
+import numpy as np
+import rclpy
+from rclpy.node import Node
+
+from nav_msgs.msg import Odometry
+from ackermann_msgs.msg import AckermannDriveStamped
+from tf_transformations import euler_from_quaternion
+from ament_index_python.packages import get_package_share_directory
+
+from .waypoint_utils import (
+    load_waypoints,
+    compute_yaw_from_path,
+    nearest_index,
+    extract_horizon,
+)
+from .mpc_solver import KinematicMPC
+
+
+# =====================================================================
+#                       TUNABLE PARAMETERS
+# =====================================================================
+
+# --- ROS topics ---
+ODOM_TOPIC      = '/ego_racecar/odom'
+DRIVE_TOPIC     = '/drive'
+
+# --- Waypoints ---
+WAYPOINTS_CSV   = os.path.join(
+    get_package_share_directory('kinematic_mpc'),
+    'config',
+    'waypoints.csv',
+)
+WP_LOOP         = True
+WP_REVERSE      = True    # set True if CSV is ordered against the car's driving direction
+LOOKAHEAD_PTS   = 20      # informational; actual horizon ref is arc-length sampled
+
+# --- MPC horizon ---
+N               = 15
+DT              = 0.05
+CTRL_RATE_HZ    = 20.0
+
+# --- Vehicle (matches f1tenth_gym kinematic_ks) ---
+WHEELBASE       = 0.33
+MAX_STEER       = 0.4189   # rad
+MAX_STEER_VEL   = 3.2      # rad/s
+MAX_ACCEL       = 9.51     # m/s^2
+MAX_SPEED       = 8.0
+MIN_SPEED       = 0.0
+
+# --- Reference ---
+TARGET_SPEED    = 2.0      # used when CSV has no v_ref or as horizon-step pacing
+
+# --- Cost weights ---
+Q_X, Q_Y, Q_YAW, Q_V    = 10.0, 10.0, 10.0, 1.0
+R_STEER_VEL, R_ACCEL    = 0.01, 0.01
+RD_STEER_VEL, RD_ACCEL  = 1.0, 1.0
+QF_SCALE                = 2.0
+
+# --- Solver ---
+IPOPT_PRINT_LEVEL = 0
+IPOPT_MAX_ITER    = 50
+
+# =====================================================================
+
+
+class KinematicMPCNode(Node):
+    def __init__(self):
+        super().__init__('kinematic_mpc_node')
+
+        # Waypoints
+        self.wps = load_waypoints(WAYPOINTS_CSV)
+        if WP_REVERSE:
+            self.wps = self.wps[::-1].copy()
+        self.yaw_ref = compute_yaw_from_path(self.wps[:, :2], loop=WP_LOOP)
+        self.last_idx = None
+        self.get_logger().info(f'Loaded {len(self.wps)} waypoints from {WAYPOINTS_CSV}')
+
+        # State (px, py, delta, v, theta) — delta is integrated from commanded steer_vel
+        self.state = np.zeros(5)
+        self.delta_cmd = 0.0
+        self.u_prev = np.zeros(2)
+        self.have_odom = False
+        self.solver_failures = 0
+
+        # MPC
+        self.mpc = KinematicMPC(
+            N=N, dt=DT, wheelbase=WHEELBASE,
+            max_steer=MAX_STEER, max_steer_vel=MAX_STEER_VEL, max_accel=MAX_ACCEL,
+            min_speed=MIN_SPEED, max_speed=MAX_SPEED,
+            Q=[Q_X, Q_Y, Q_YAW, Q_V],
+            R=[R_STEER_VEL, R_ACCEL],
+            Rd=[RD_STEER_VEL, RD_ACCEL],
+            qf_scale=QF_SCALE,
+            ipopt_print_level=IPOPT_PRINT_LEVEL,
+            ipopt_max_iter=IPOPT_MAX_ITER,
+        )
+
+        # ROS interfaces
+        self.create_subscription(Odometry, ODOM_TOPIC, self.odom_cb, 10)
+        self.drive_pub = self.create_publisher(AckermannDriveStamped, DRIVE_TOPIC, 10)
+        self.create_timer(1.0 / CTRL_RATE_HZ, self.control_loop)
+
+    def odom_cb(self, msg):
+        p = msg.pose.pose.position
+        q = msg.pose.pose.orientation
+        _, _, yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
+        # Linear speed from twist (longitudinal in body frame)
+        vx = msg.twist.twist.linear.x
+        vy = msg.twist.twist.linear.y
+        v = float(np.hypot(vx, vy))
+        self.state[0] = p.x
+        self.state[1] = p.y
+        self.state[2] = self.delta_cmd        # use last commanded steering as proxy
+        self.state[3] = v
+        self.state[4] = yaw
+        self.have_odom = True
+
+    def control_loop(self):
+        if not self.have_odom:
+            return
+
+        # 1. Nearest waypoint (warm-started)
+        idx = nearest_index(
+            self.wps[:, :2], self.state[:2],
+            last_idx=self.last_idx, search_window=30, loop=WP_LOOP,
+        )
+        self.last_idx = idx
+
+        # 2. Horizon reference
+        v_pace = max(TARGET_SPEED * 0.5, float(self.state[3]))
+        x_ref = extract_horizon(
+            self.wps, self.yaw_ref, idx, N, DT,
+            v_target=v_pace, loop=WP_LOOP,
+        )
+
+        # Align reference yaw to current yaw to avoid 2pi jumps
+        x_ref[2, :] += np.round((self.state[4] - x_ref[2, 0]) / (2.0 * np.pi)) * 2.0 * np.pi
+
+        # 3. Solve MPC
+        u0, _X, _U, ok = self.mpc.solve(self.state, x_ref, self.u_prev)
+        if not ok:
+            self.solver_failures += 1
+            if self.solver_failures >= 2:
+                self.get_logger().warn(f'MPC solver failed {self.solver_failures}x; using fallback')
+            # Fallback: hold previous command, decay accel toward 0
+            u0 = np.array([0.0, 0.0])
+        else:
+            self.solver_failures = 0
+
+        self.u_prev = u0.copy()
+
+        # 4. Convert (steer_vel, accel) into AckermannDrive (steering_angle, speed)
+        self.delta_cmd = float(np.clip(self.delta_cmd + u0[0] * DT, -MAX_STEER, MAX_STEER))
+        speed_cmd = float(np.clip(self.state[3] + u0[1] * DT, MIN_SPEED, MAX_SPEED))
+
+        # 5. Publish
+        msg = AckermannDriveStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.drive.steering_angle = self.delta_cmd
+        msg.drive.speed = speed_cmd
+        self.drive_pub.publish(msg)
+
+
+def main():
+    rclpy.init()
+    node = KinematicMPCNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
