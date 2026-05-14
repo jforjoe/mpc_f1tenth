@@ -48,9 +48,9 @@ from scipy.ndimage import label
 # =============================================================================
 
 # --- Files ---
-MAP_YAML            = '/sim_ws/src/f1tenth_gym_ros/maps/Spielberg_map.yaml'
-OUTPUT_CSV          = '/sim_ws/src/mpc_f1tenth/config/raceline.csv'
-PLOT_DIR            = '/sim_ws/src/mpc_f1tenth/config/plots'
+MAP_YAML            = '/sim_ws/src/f1tenth_gym_ros/maps/map.yaml'
+OUTPUT_CSV          = '/sim_ws/src/mpc_f1tenth/config/raceline_map.csv'
+PLOT_DIR            = '/sim_ws/src/mpc_f1tenth/config/plots_map'
 
 # --- Track isolation (handles maps where space outside the track is also free) ---
 ISOLATE_TRACK       = True
@@ -70,6 +70,8 @@ N_REFINE            = 3           # min-curvature re-linearization passes
 LAMBDA_OFFSET       = 0.01        # Tikhonov weight on ||alpha||^2 — pulls toward centerline.
                                   # Raise (e.g. 0.05) if the raceline still drifts unrealistically.
                                   # Lower (e.g. 1e-4) for aggressive corner-cutting on wide tracks.
+# LAMBDA_OFFSET       = 1e-4
+
 LBFGSB_MAXITER      = 300
 LBFGSB_FTOL         = 1e-10
 
