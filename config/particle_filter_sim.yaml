@@ -1,0 +1,38 @@
+particle_filter_node:
+  ros__parameters:
+
+    # --- Topics (remapped in launch file to sim's ego_racecar namespace) ---
+    scan_topic: /scan
+    odometry_topic: /odom
+
+    # --- Particles ---
+    max_particles: 500          # enough for sim; raise to 2000+ on hardware
+    max_viz_particles: 60
+
+    # --- Range method ---
+    range_method: cddt          # CPU mode — fast enough for sim
+                                # change to rmgpu on hardware if CUDA available
+    rangelib_variant: 2
+    theta_discretization: 112
+    max_range: 10.0
+
+    # --- Sensor model ---
+    z_short: 0.01
+    z_max: 0.07
+    z_rand: 0.12
+    z_hit: 0.75
+    sigma_hit: 8.0
+    squash_factor: 2.2
+
+    # --- Motion model ---
+    motion_dispersion_x: 0.05
+    motion_dispersion_y: 0.025
+    motion_dispersion_theta: 0.25
+
+    # --- Output ---
+    publish_odom: 1             # publish /pf/pose/odom (Odometry) — MPC reads this
+    viz: 1                      # publish visualization topics for RViz
+    fine_timing: 0
+
+    # --- Misc ---
+    angle_step: 18

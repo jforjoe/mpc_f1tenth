@@ -48,8 +48,8 @@ from scipy.ndimage import label
 # =============================================================================
 
 # --- Files ---
-MAP_YAML            = '/sim_ws/src/f1tenth_gym_ros/maps/map.yaml'
-OUTPUT_CSV          = '/sim_ws/src/mpc_f1tenth/config/raceline_map.csv'
+MAP_YAML            = '/sim_ws/src/f1tenth_gym_ros/maps/Spielberg_map.yaml'
+OUTPUT_CSV          = '/sim_ws/src/mpc_f1tenth/config/raceline.csv'
 PLOT_DIR            = '/sim_ws/src/mpc_f1tenth/config/plots_map'
 
 # --- Track isolation (handles maps where space outside the track is also free) ---
