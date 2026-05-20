@@ -12,7 +12,7 @@ class WaypointVisualizer(Node):
         self.publisher = self.create_publisher(Marker, 'visualization_marker', 10)
 
         # Load all waypoints once at startup
-        self.points = self.load_csv('waypoints.csv')
+        self.points = self.load_csv('raceline.csv')
         self.get_logger().info(f'Loaded {len(self.points)} waypoints')
 
         # Index tracking how many points have been published so far

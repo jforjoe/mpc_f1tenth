@@ -38,8 +38,8 @@ except Exception:
 # =====================================================================
 
 # --- ROS topics ---
-# ODOM_TOPIC      = '/ego_racecar/odom'   # direct sim ground truth (bypass PF)
-ODOM_TOPIC      = '/pf/pose/odom'          # particle filter output (sim + hardware)
+ODOM_TOPIC      = '/ego_racecar/odom'   # direct sim ground truth (bypass PF)
+# ODOM_TOPIC      = '/pf/pose/odom'          # particle filter output (sim + hardware)
 DRIVE_TOPIC     = '/drive'
 
 # --- Waypoints ---
@@ -50,34 +50,42 @@ WAYPOINTS_CSV   = os.path.join(
     'raceline.csv',
 )
 WP_LOOP         = True
-WP_REVERSE      = True    # set True if CSV is ordered against the car's driving direction
-LOOKAHEAD_PTS   = 20      # informational; actual horizon ref is arc-length sampled
+# False: raceline CSV is already ordered in the car's driving direction at spawn (sx=0,sy=0,stheta=0).
+# The waypoint nearest the origin has heading ~4° (eastward) in the original order,
+# which matches the car's initial facing. Reversing would flip it to ~180° (westward) → instant crash.
+WP_REVERSE      = False
+LOOKAHEAD_PTS   = 30      # informational; actual horizon ref is arc-length sampled
 
 # --- MPC horizon ---
 N               = 15
 DT              = 0.05
 CTRL_RATE_HZ    = 20.0
 
-# --- Vehicle (matches f1tenth_gym kinematic_ks) ---
-WHEELBASE       = 0.33
-MAX_STEER       = 0.4189   # rad
-MAX_STEER_VEL   = 3.2      # rad/s
-MAX_ACCEL       = 9.51     # m/s^2
-MAX_SPEED       = 8.0
-MIN_SPEED       = 0.0
+# --- Vehicle (from vesc.yaml hardware calibration) ---
+# vesc_to_odom_node.wheelbase = 0.325 m
+WHEELBASE       = 0.325
+# servo_min=0.15 → (0.15-0.48)/(-1.2135) = 0.272 rad; confirmed by nav2 min_turning_radius = 1.17 m
+MAX_STEER       = 0.472    # rad
+# throttle_interpolator.max_servo_speed = 3.2 rad/s
+MAX_STEER_VEL   = 3.0      # rad/s
+# throttle_interpolator.max_acceleration = 2.5 m/s²
+MAX_ACCEL       = 2.5      # m/s²
+# speed_min=-23250 ERPM / |gain=4100| = 5.67 m/s; cap 0.17 m/s below for margin
+MAX_SPEED       = 3.5      # m/s  (raise in 0.5 m/s steps once tracking is stable)
+MIN_SPEED       = 1.0
 
 # --- Reference ---
 TARGET_SPEED    = 1.5      # REDUCED: 2.0 → 1.5 (slower through turns)
 
 # --- Cost weights ---
 Q_X, Q_Y, Q_YAW, Q_V    = 10.0, 10.0, 10.0, 0.5  # REDUCED tracking penalties (was 10,10,10,1)
-R_STEER_VEL, R_ACCEL    = 0.005, 0.005         # REDUCED (was 0.01, 0.01)
+R_STEER_VEL, R_ACCEL    = 0.001, 0.001         # REDUCED (was 0.01, 0.01)
 RD_STEER_VEL, RD_ACCEL  = 0.5, 0.5             # REDUCED (was 1.0, 1.0)
 QF_SCALE                = 1.0                  # REDUCED (was 2.0)
 
 # --- Solver ---
 IPOPT_PRINT_LEVEL = 0      # CHANGED: 0 → 5 (debug output)
-IPOPT_MAX_ITER    = 100    # INCREASED: 50 → 100 (more time)
+IPOPT_MAX_ITER    = 200    # INCREASED: 50 → 100 (more time)
 
 # =====================================================================
 
@@ -151,12 +159,18 @@ class KinematicMPCNode(Node):
             self.wps, self.yaw_ref, idx, N, DT,
             v_target=v_pace, loop=WP_LOOP,
         )
+        # Cap reference velocity — raceline CSV has 2–8 m/s; clamp to TARGET_SPEED so
+        # the solver isn't chasing a reference that demands aggressive acceleration.
+        x_ref[3, :] = np.clip(x_ref[3, :], 0.0, TARGET_SPEED)
 
         # Align reference yaw to current yaw to avoid 2pi jumps
         x_ref[2, :] += np.round((self.state[4] - x_ref[2, 0]) / (2.0 * np.pi)) * 2.0 * np.pi
 
-        # 3. Solve MPC
-        u0, _X, _U, ok = self.mpc.solve(self.state, x_ref, self.u_prev)
+        # 3. Solve MPC — clamp initial state to avoid bound violations at k=0
+        state_clamped = self.state.copy()
+        state_clamped[2] = float(np.clip(state_clamped[2], -MAX_STEER, MAX_STEER))
+        state_clamped[3] = float(np.clip(state_clamped[3], 0.0, MAX_SPEED))
+        u0, _X, _U, ok = self.mpc.solve(state_clamped, x_ref, self.u_prev)
         if not ok:
             self.solver_failures += 1
             if self.solver_failures >= 2:

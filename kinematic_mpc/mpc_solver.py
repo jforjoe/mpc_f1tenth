@@ -49,9 +49,12 @@ class KinematicMPC:
             x_next = rk4_step(X[:, k], U[:, k], dt, wheelbase)
             opti.subject_to(X[:, k + 1] == x_next)
 
-        # State bounds
+        # State bounds — speed bound starts at k=1, not k=0.
+        # X[:,0] is pinned by the equality X[:,0]==x0 (initial state).
+        # If measured speed < min_speed (e.g., car stopped at startup), including k=0
+        # creates a direct contradiction: X[3,0]==v_measured AND X[3,0]>=min_speed → infeasible.
         opti.subject_to(opti.bounded(-max_steer, X[2, :], max_steer))
-        opti.subject_to(opti.bounded(min_speed, X[3, :], max_speed))
+        opti.subject_to(opti.bounded(min_speed, X[3, 1:], max_speed))
 
         # Input bounds
         opti.subject_to(opti.bounded(-max_steer_vel, U[0, :], max_steer_vel))
