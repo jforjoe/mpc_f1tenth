@@ -56,7 +56,7 @@ WP_LOOP         = True
 WP_REVERSE      = False    # set True if CSV is ordered against the car's driving direction
 
 # --- MPC horizon ---
-N               = 15
+N               = 40        # was 15 — 40×0.05 = 2 s preview; car sees turns ~1.6 m ahead at 0.8 m/s
 DT              = 0.05
 CTRL_RATE_HZ    = 20.0
 
@@ -76,7 +76,7 @@ MAX_STEER_VEL   = 3.2      # rad/s
 MAX_ACCEL       = 2.5      # m/s²
 # speed_min=-23250 ERPM / |gain=4100| = 5.67 m/s; cap 0.17 m/s below for margin
 MAX_SPEED       = 3.5      # m/s  (raise in 0.5 m/s steps once tracking is stable)
-MIN_SPEED       = 1.0
+MIN_SPEED       = 0.5
 
 # --- Reference ---
 # Speed cap applied to every waypoint's vx_mps value from the CSV.
@@ -85,14 +85,14 @@ MIN_SPEED       = 1.0
 TARGET_SPEED    = 1.5      # m/s  — start here; raise in 0.5 m/s steps once tracking is stable
 
 # --- Cost weights ---
-Q_X, Q_Y, Q_YAW, Q_V    = 10.0, 10.0, 10.0, 0.5  # REDUCED tracking penalties (was 10,10,10,1)
-R_STEER_VEL, R_ACCEL    = 0.001, 0.001         # REDUCED (was 0.01, 0.01)
-RD_STEER_VEL, RD_ACCEL  = 0.5, 0.5             # REDUCED (was 1.0, 1.0)
-QF_SCALE                = 1.0                  # REDUCED (was 2.0)
+Q_X, Q_Y, Q_YAW, Q_V    = 20.0, 20.0, 20.0, 0.5  # Q_YAW raised to 20 — earlier yaw alignment in turns
+R_STEER_VEL, R_ACCEL    = 0.01, 0.01           # raised from 0.001 — damps abrupt steer commands
+RD_STEER_VEL, RD_ACCEL  = 1.0, 0.5             # raised RD_STEER_VEL — smoother steering rate changes
+QF_SCALE                = 2.0                  # raised from 1.0 — stronger pull toward end of horizon
 
 # --- Solver ---
 IPOPT_PRINT_LEVEL = 0     # 0=silent (deployment), 5=verbose (debugging only)
-IPOPT_MAX_ITER    = 50     # 50 is plenty at 20 Hz; raise to 100 only when debugging convergence
+IPOPT_MAX_ITER    = 100     # 50 is plenty at 20 Hz; raise to 100 only when debugging convergence
 
 # --- Debug / visualization ---
 # Set True to publish RViz markers: /mpc/raceline (green), /mpc/horizon (blue), /mpc/ref_horizon (yellow)
@@ -210,7 +210,8 @@ class KinematicMPCNode(Node):
         self.state[0] = x
         self.state[1] = y
         self.state[2] = self.delta_cmd
-        self.state[3] = self._v
+        # self.state[3] = self._v
+        self.state[3] = max(self._v, MIN_SPEED)
         self.state[4] = yaw
 
         # 2. Nearest waypoint (warm-started) + lap detection
