@@ -7,12 +7,13 @@ setup(
     name=package_name,
     version='0.1.0',
     packages=[package_name],
-    package_dir={package_name: '.'},
+    package_dir={package_name: 'scripts'},
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', glob('launch/*.py')),
-        ('share/' + package_name + '/config', glob('config/*.csv')),
+        ('share/' + package_name + '/config', glob('config/*.csv') + glob('config/*.yaml')),
+        ('share/' + package_name + '/params', glob('params/*.yaml')),
         ('share/' + package_name + '/rviz',   glob('rviz/*.rviz')),
     ],
     install_requires=['setuptools'],
@@ -24,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'mpc_node = kinematic_mpc.mpc_node:main',
+            'mpc_debug_node = kinematic_mpc.mpc_node_debug:main'
         ],
     },
 )

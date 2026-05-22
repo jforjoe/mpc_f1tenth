@@ -98,6 +98,17 @@ IPOPT_MAX_ITER    = 100     # 50 is plenty at 20 Hz; raise to 100 only when debu
 # Set True to publish RViz markers: /mpc/raceline (green), /mpc/horizon (blue), /mpc/ref_horizon (yellow)
 PUBLISH_MARKERS  = True
 
+# --- Steering-only debug mode ---
+# True  → MPC computes steering from map; speed is copied from the RC /teleop topic.
+#         Keep the AUTO switch ON so the mux routes /drive to the VESC, then control
+#         speed manually with the throttle stick.  Steering should track the raceline.
+# False → normal MPC: both speed and steering are commanded by the solver.
+STEER_ONLY_MODE  = True
+TELEOP_TOPIC     = '/teleop'   # AckermannDriveStamped from crsf_teleop (mux.yaml)
+
+# Warn when AMCL pose jumps more than this between control cycles (wheel-slip / EKF glitch).
+MAX_POS_JUMP_M   = 0.3   # metres — anything above this in 50 ms is physically impossible
+
 # =====================================================================
 
 
@@ -131,6 +142,10 @@ class KinematicMPCNode(Node):
         self.u_prev = np.zeros(2)
         self.solver_failures = 0
 
+        # Steer-only debug state
+        self._rc_speed = 0.0    # latest speed seen on /teleop (from RC stick)
+        self._last_xy  = None   # previous cycle's (x, y) — used for jump detection
+
 
 
         self._status_t0 = self.get_clock().now().nanoseconds * 1e-9
@@ -158,6 +173,13 @@ class KinematicMPCNode(Node):
         self._lap_pub  = self.create_publisher(Int32, '/mpc/lap', 5)
         self.create_timer(1.0 / CTRL_RATE_HZ, self.control_loop)
 
+        if STEER_ONLY_MODE:
+            self.create_subscription(AckermannDriveStamped, TELEOP_TOPIC, self._teleop_cb, 10)
+            self.get_logger().warn(
+                '[DEBUG] STEER_ONLY_MODE=True — steering from MPC, speed from RC /teleop. '
+                'Keep AUTO switch ON on remote so mux routes /drive to VESC.'
+            )
+
         if PUBLISH_MARKERS:
             self._raceline_pub   = self.create_publisher(Marker, '/mpc/raceline',    1)
             self._horizon_pub    = self.create_publisher(Marker, '/mpc/horizon',     1)
@@ -179,6 +201,11 @@ class KinematicMPCNode(Node):
             return t.x, t.y, _quat_to_yaw(r.x, r.y, r.z, r.w)
         except Exception:
             return None
+
+    def _teleop_cb(self, msg: AckermannDriveStamped):
+        """Track RC speed so STEER_ONLY_MODE can mirror it in the /drive message."""
+        # abs() because SPEED_SIGN handles polarity — we just need the magnitude
+        self._rc_speed = abs(msg.drive.speed)
 
     def _check_lap(self):
         """Detect lap completion when waypoint index wraps from ≥85% to ≤15%."""
@@ -207,6 +234,18 @@ class KinematicMPCNode(Node):
             self.get_logger().info('[TF] map→base_link available — MPC active')
             self._tf_ready = True
         x, y, yaw = pose
+
+        # Position-jump detector: wheel slip or AMCL glitch causes sudden teleport
+        if self._last_xy is not None:
+            jump = math.hypot(x - self._last_xy[0], y - self._last_xy[1])
+            if jump > MAX_POS_JUMP_M:
+                self.get_logger().warn(
+                    f'[POSE JUMP] {jump:.3f} m in one cycle! '
+                    f'prev=({self._last_xy[0]:.2f},{self._last_xy[1]:.2f}) '
+                    f'now=({x:.2f},{y:.2f}) — wheel slip / EKF divergence?'
+                )
+        self._last_xy = (x, y)
+
         self.state[0] = x
         self.state[1] = y
         self.state[2] = self.delta_cmd
@@ -224,8 +263,12 @@ class KinematicMPCNode(Node):
         self._n_idx  = idx
         self._check_lap()
 
-        # 3. Horizon reference — use commanded speed so arc-length spacing matches reality
-        v_pace = max(self._speed_cmd if self._speed_cmd > 0 else MIN_SPEED, float(self.state[3]))
+        # 3. Horizon reference — pace the arc-length look-ahead at actual/commanded speed
+        if STEER_ONLY_MODE:
+            # Use measured velocity; fall back to 0.3 m/s so horizon doesn't collapse at standstill
+            v_pace = max(self._v, 0.3)
+        else:
+            v_pace = max(self._speed_cmd if self._speed_cmd > 0 else MIN_SPEED, float(self.state[3]))
         x_ref = extract_horizon(
             self.wps, self.yaw_ref, idx, N, DT,
             v_target=v_pace, loop=WP_LOOP,
@@ -266,8 +309,11 @@ class KinematicMPCNode(Node):
         # 6. Publish
         msg = AckermannDriveStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
-        # in control_loop publish block:
-        msg.drive.speed          = SPEED_SIGN * self._speed_cmd
+        if STEER_ONLY_MODE:
+            # Speed mirrors what the RC stick is commanding; MPC only steers.
+            msg.drive.speed = SPEED_SIGN * self._rc_speed
+        else:
+            msg.drive.speed = SPEED_SIGN * self._speed_cmd
         msg.drive.steering_angle = STEER_SIGN * self.delta_cmd
 
         self.drive_pub.publish(msg)
@@ -276,11 +322,14 @@ class KinematicMPCNode(Node):
         now_s = self.get_clock().now().nanoseconds * 1e-9
         if now_s - self._status_t0 >= self._status_period:
             dist_to_wp = float(np.linalg.norm(self.wps[idx, :2] - self.state[:2]))
+            if STEER_ONLY_MODE:
+                speed_str = f'rc_speed={self._rc_speed:.2f}m/s(sent={SPEED_SIGN*self._rc_speed:.2f})'
+            else:
+                speed_str = f'cmd_v={self._speed_cmd:.2f}m/s(sent={SPEED_SIGN*self._speed_cmd:.2f})'
             self.get_logger().info(
-                f'[MPC] lap={self._lap} wp={idx}/{len(self.wps)} '
-                f'dist_to_wp={dist_to_wp:.2f}m | '
-                f'cmd: v={self._speed_cmd:.2f}m/s({SPEED_SIGN*self._speed_cmd:.2f}) '
-                f'steer={math.degrees(self.delta_cmd):.1f}° | '
+                f'[MPC{"*STEER-ONLY*" if STEER_ONLY_MODE else ""}] '
+                f'lap={self._lap} wp={idx}/{len(self.wps)} dist={dist_to_wp:.2f}m | '
+                f'{speed_str} steer={math.degrees(self.delta_cmd):.1f}° | '
                 f'measured_v={self._v:.2f}m/s '
                 f'pose=({x:.2f},{y:.2f},{math.degrees(yaw):.0f}°) | '
                 f'solver_fails={self.solver_failures}')
