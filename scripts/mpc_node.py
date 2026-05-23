@@ -21,8 +21,12 @@ from nav_msgs.msg import Odometry
 from std_msgs.msg import Int32
 from visualization_msgs.msg import Marker
 
-from .mpc_solver import KinematicMPC
-from .waypoint_utils import load_waypoints, compute_yaw_from_path, nearest_index, extract_horizon
+try:
+    from .mpc_solver import KinematicMPC
+    from .waypoint_utils import load_waypoints, compute_yaw_from_path, nearest_index, extract_horizon
+except ImportError:
+    from mpc_solver import KinematicMPC
+    from waypoint_utils import load_waypoints, compute_yaw_from_path, nearest_index, extract_horizon
 
 
 def _quat_to_yaw(qx: float, qy: float, qz: float, qw: float) -> float:
@@ -48,8 +52,8 @@ def _resolve_waypoints_csv() -> str:
             return os.path.join(_get_pkg_share(pkg), 'config', 'raceline.csv')
         except Exception:
             pass
-    # Fallback: config/ sibling of this file's package root
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config', 'raceline.csv')
+    # Fallback: config/ at the package root (one level above scripts/)
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config', 'raceline.csv')
 
 WAYPOINTS_CSV   = _resolve_waypoints_csv()
 WP_LOOP         = True

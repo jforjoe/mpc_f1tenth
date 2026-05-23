@@ -2,7 +2,7 @@
 """
 Remote visualization for kinematic_mpc — run this on the LAPTOP.
 
-The car runs:   ros2 launch kinematic_mpc mpc_launch.py
+The car runs:    ros2 launch kinematic_mpc mpc_bringup_launch.py viz:=False
 The laptop runs: ros2 launch kinematic_mpc mpc_viz_launch.py
 
 Requirements on the laptop (one-time setup):
@@ -12,11 +12,14 @@ Requirements on the laptop (one-time setup):
     source <your_ws>/install/setup.bash
 
 RViz shows:
-    - Map + LiDAR scan (car sees the same map it localises against)
-    - AMCL particle cloud (localisation confidence)
+    - Map + LiDAR scan
+    - AMCL particle cloud  (/particle_cloud)
     - Car pose arrow  (/amcl_pose)
-    - TF frames  (map → odom → base_link — orientation of the car)
+    - TF frames  (map → odom → base_link)
     - EKF velocity arrow  (/odometry/filtered)
+    - Global Costmap  (/global_costmap/costmap)
+    - Local Costmap  (/local_costmap/costmap)
+    - Nav2 planned path  (/plan)
     - MPC raceline  /mpc/raceline   (green  — full raceline, published once)
     - MPC predicted horizon  /mpc/horizon   (blue  — what the solver plans)
     - MPC reference horizon  /mpc/ref_horizon  (yellow — what the solver chases)

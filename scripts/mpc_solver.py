@@ -3,7 +3,10 @@
 import casadi as ca
 import numpy as np
 
-from .kinematic_model import rk4_step
+try:
+    from .kinematic_model import rk4_step
+except ImportError:
+    from kinematic_model import rk4_step
 
 
 class KinematicMPC:
